@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Diagnostics</title>
+</head>
+<body style="background: #0a0e1a; color: #fff; padding: 2rem; font-family: monospace;">
+    <h1>GTO Poker Trainer - Diagnostics</h1>
+    <div id="status"></div>
+    
+    <script src="poker-engine.js"></script>
+    <script src="preflop-ranges.js"></script>
+    <script src="gto-solver-simple.js"></script>
+    <script>
+        const status = document.getElementById('status');
+        let checks = [];
+        
+        // Check 1: pokerEngine loaded
+        checks.push({
+            name: 'poker-engine.js',
+            status: typeof pokerEngine !== 'undefined',
+            error: typeof pokerEngine === 'undefined' ? 'Not loaded' : null
+        });
+        
+        // Check 2: preflopRanges loaded
+        checks.push({
+            name: 'preflop-ranges.js',
+            status: typeof preflopRanges !== 'undefined',
+            error: typeof preflopRanges === 'undefined' ? 'Not loaded' : null
+        });
+        
+        // Check 3: gtoSolver loaded
+        checks.push({
+            name: 'gto-solver-advanced.js',
+            status: typeof gtoSolver !== 'undefined',
+            error: typeof gtoSolver === 'undefined' ? 'Not loaded' : null
+        });
+        
+        // Check 4: Can create deck
+        try {
+            const deck = pokerEngine.createDeck();
+            checks.push({
+                name: 'pokerEngine.createDeck()',
+                status: deck.length === 52,
+                error: deck.length !== 52 ? `Wrong deck size: ${deck.length}` : null
+            });
+        } catch (e) {
+            checks.push({
+                name: 'pokerEngine.createDeck()',
+                status: false,
+                error: e.message
+            });
+        }
+        
+        // Check 5: Can get range
+        try {
+            const range = preflopRanges.getRange('BB', 'call', 'BTN');
+            checks.push({
+                name: 'preflopRanges.getRange()',
+                status: range && range.length > 0,
+                error: !range || range.length === 0 ? 'Empty range' : null
+            });
+        } catch (e) {
+            checks.push({
+                name: 'preflopRanges.getRange()',
+                status: false,
+                error: e.message
+            });
+        }
+        
+        // Check 6: Can initialize solver
+        try {
+            gtoSolver.initialize();
+            checks.push({
+                name: 'gtoSolver.initialize()',
+                status: true,
+                error: null
+            });
+        } catch (e) {
+            checks.push({
+                name: 'gtoSolver.initialize()',
+                status: false,
+                error: e.message
+            });
+        }
+        
+        // Display results
+        let html = '<h2>Results:</h2>';
+        let allPassed = true;
+        
+        checks.forEach(check => {
+            const icon = check.status ? '✅' : '❌';
+            const color = check.status ? '#44ff44' : '#ff4444';
+            html += `<div style="margin: 1rem 0; padding: 1rem; background: #1a2332; border-left: 4px solid ${color};">`;
+            html += `<strong>${icon} ${check.name}</strong><br>`;
+            if (check.error) {
+                html += `<span style="color: #ff6b6b;">Error: ${check.error}</span>`;
+            } else {
+                html += `<span style="color: #44ff44;">Working correctly</span>`;
+            }
+            html += '</div>';
+            
+            if (!check.status) allPassed = false;
+        });
+        
+        if (allPassed) {
+            html += '<h2 style="color: #44ff44;">✅ All checks passed! App should work.</h2>';
+            html += '<p><a href="/" style="color: #00d9ff;">Go back to main app</a></p>';
+        } else {
+            html += '<h2 style="color: #ff4444;">❌ Some checks failed. See errors above.</h2>';
+        }
+        
+        status.innerHTML = html;
+    </script>
+</body>
+</html>
+
