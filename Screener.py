@@ -26,7 +26,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- CREDENTIALS ---
-POLYGON_KEY = "REDACTED"
+POLYGON_KEY = st.secrets.get("POLYGON_KEY", "REDACTED")
 
 # --- HELPER FUNCTIONS ---
 
