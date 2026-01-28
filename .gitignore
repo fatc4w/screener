@@ -1,6 +1,33 @@
+# Environment
 .venv/
+venv/
+.env
+
+# Python junk
 __pycache__/
 *.pyc
 .DS_Store
-.env
+
+# IDE junk
 .cursor/
+.vscode/
+
+# Data and Plots (keep the code, ignore the output)
+*.png
+*.csv
+*.ipynb
+
+# Unrelated projects
+poker-trainer/
+
+# Other junk
+2.png
+README_OPTIONS.md
+SPX spread.ipynb
+fx_china_settlement_plot.png
+fx_line_chart.png
+fx_monthly_change_chart.png
+usdkrw_q1_seasonality.png
+usdtwd_percentiles.png
+usdtwd_zscore.png
+spx_rolling_analysis.png
