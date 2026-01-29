@@ -141,8 +141,9 @@ def get_seasonality_composite(df, window_type="Month"):
 
 def calculate_drawdown(series):
     roll_max = series.cummax()
-    drawdown = (series / roll_max) - 1
-    return drawdown
+    # Avoid division by zero
+    drawdown = np.where(roll_max != 0, (series / roll_max) - 1, 0)
+    return pd.Series(drawdown, index=series.index)
 
 # --- MAIN DASHBOARD ---
 st.title("Bullshet Screener")
