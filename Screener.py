@@ -27,7 +27,11 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- CREDENTIALS ---
-POLYGON_KEY = (st.secrets["POLYGON_KEY"] if "POLYGON_KEY" in st.secrets else None) or os.getenv("POLYGON_KEY")
+POLYGON_KEY = (
+    st.secrets.get("POLYGON_KEY") or 
+    os.getenv("POLYGON_KEY") or 
+    os.getenv("POLYGON_API_KEY")
+)
 
 # --- HELPER FUNCTIONS ---
 
