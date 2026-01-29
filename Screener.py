@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
+import os
 
 # --- CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="Bullshet Screener")
@@ -26,13 +27,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- CREDENTIALS ---
-POLYGON_KEY = st.secrets.get("POLYGON_KEY", "REDACTED")
+POLYGON_KEY = (st.secrets["POLYGON_KEY"] if "POLYGON_KEY" in st.secrets else None) or os.getenv("POLYGON_KEY")
 
 # --- HELPER FUNCTIONS ---
 
 def get_data(ticker, source, start_date, end_date):
     try:
         if source == "Polygon":
+            if not POLYGON_KEY:
+                raise RuntimeError("Missing Polygon API key. Set `POLYGON_KEY` in Streamlit Secrets (or env var POLYGON_KEY).")
             s_date = start_date.strftime("%Y-%m-%d")
             e_date = end_date.strftime("%Y-%m-%d")
             url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{s_date}/{e_date}"
@@ -111,18 +114,31 @@ def get_seasonality_composite(df, window_type="Month"):
             valid_years.append(y)
 
     season_df = pd.DataFrame(season_data)
-    if season_df.empty: return None, None, None, None
+    if season_df.empty:
+        return None, None, None, None, None, 0
 
-    final_rets = season_df.iloc[-1]
-    best_y = final_rets.idxmax()
-    worst_y = final_rets.idxmin()
-    
-    filtered_years = [y for y in valid_years if y != best_y and y != worst_y]
+    # Use each year's last available cumulative return (month/quarter lengths vary).
+    final_rets = season_df.apply(
+        lambda s: s.dropna().iloc[-1] if s.dropna().size else np.nan,
+        axis=0,
+    ).dropna()
+    n_years = int(final_rets.shape[0])
+    win_rate = float((final_rets > 0).mean()) if n_years else None
+
+    # Only trim best/worst outliers if we have enough history.
+    if n_years >= 5:
+        best_y = final_rets.idxmax()
+        worst_y = final_rets.idxmin()
+        filtered_years = [int(y) for y in final_rets.index if y not in (best_y, worst_y)]
+    else:
+        filtered_years = [int(y) for y in final_rets.index]
+
     filtered_df = season_df[filtered_years]
-    
-    avg_curve = filtered_df.mean(axis=1)
-    p20 = filtered_df.quantile(0.20, axis=1)
-    p80 = filtered_df.quantile(0.80, axis=1)
+    counts = filtered_df.count(axis=1)
+
+    avg_curve = filtered_df.mean(axis=1, skipna=True).where(counts >= 1)
+    p20 = filtered_df.quantile(0.20, axis=1).where(counts >= 3 if n_years >= 3 else counts >= 1)
+    p80 = filtered_df.quantile(0.80, axis=1).where(counts >= 3 if n_years >= 3 else counts >= 1)
     
     if window_type == "Month":
         curr_mask = (df['Year'] == current_date.year) & (df['Month'] == current_date.month)
@@ -135,9 +151,9 @@ def get_seasonality_composite(df, window_type="Month"):
         curr_df['DayIndex'] = range(len(curr_df))
         current_curve = curr_df.set_index('DayIndex')['CumRet']
     else:
-        current_curve = pd.Series()
+        current_curve = pd.Series(dtype=float)
         
-    return current_curve, avg_curve, p20, p80
+    return current_curve, avg_curve, p20, p80, win_rate, n_years
 
 def calculate_drawdown(series):
     roll_max = series.cummax()
@@ -225,12 +241,32 @@ with tab1:
             
             s_mode = st.radio("Window", ["Current Month", "Current Quarter"], horizontal=True)
             w_type = "Month" if "Month" in s_mode else "Quarter"
-            curr, avg, p20, p80 = get_seasonality_composite(df, w_type)
+            curr, avg, p20, p80, win_rate, n_years = get_seasonality_composite(df, w_type)
             
             if avg is not None:
+                m1, m2 = st.columns(2)
+                m1.metric("10Y Win Rate (period up)", f"{(win_rate * 100):.0f}%" if win_rate is not None else "N/A")
+                m2.metric("Years used", str(n_years))
+
                 fig_s = go.Figure()
                 x_axis = avg.index
-                fig_s.add_trace(go.Scatter(x=pd.concat([pd.Series(x_axis), pd.Series(x_axis)[::-1]]), y=pd.concat([p80, p20[::-1]]), fill='toself', fillcolor='rgba(0, 100, 255, 0.15)', line=dict(color='rgba(255,255,255,0)'), name='Normal Range (20-80%)'))
+
+                band_mask = p20.notna() & p80.notna()
+                x_band = x_axis[band_mask]
+                if len(x_band) >= 2:
+                    p20_band = p20[band_mask]
+                    p80_band = p80[band_mask]
+                    x_fill = list(x_band) + list(x_band[::-1])
+                    y_fill = list(p80_band) + list(p20_band[::-1])
+                    fig_s.add_trace(go.Scatter(
+                        x=x_fill,
+                        y=y_fill,
+                        fill='toself',
+                        fillcolor='rgba(0, 100, 255, 0.15)',
+                        line=dict(color='rgba(255,255,255,0)'),
+                        name='Normal Range (20-80%)'
+                    ))
+
                 fig_s.add_trace(go.Scatter(x=x_axis, y=avg, mode='lines', name='Typical Path (10Y Avg)', line=dict(color='#FFD700', dash='dash', width=2)))
                 fig_s.add_trace(go.Scatter(x=curr.index, y=curr, mode='lines', name='Current Price Action', line=dict(color='white', width=3)))
                 fig_s.update_layout(title=f"Seasonality: {s_mode} Projection", xaxis_title="Trading Days", yaxis_title="Cumulative Return", template="plotly_dark", height=500)

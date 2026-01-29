@@ -20,6 +20,9 @@ __pycache__/
 # Unrelated projects
 poker-trainer/
 
+# Streamlit secrets (never commit)
+.streamlit/secrets.toml
+
 # Other junk
 2.png
 README_OPTIONS.md
