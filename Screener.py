@@ -100,7 +100,9 @@ def get_seasonality_composite(df, window_type="Month"):
     current_date = df.index[-1]
     
     season_data = {}
-    years = range(current_date.year - 10, current_date.year) 
+    # Use the last 10 *available* completed years from the data (avoid assuming full history exists).
+    available_years = sorted(int(y) for y in df['Year'].dropna().unique())
+    years = [y for y in available_years if y < current_date.year][-10:]
     valid_years = []
     
     for y in years:
@@ -119,7 +121,7 @@ def get_seasonality_composite(df, window_type="Month"):
 
     season_df = pd.DataFrame(season_data)
     if season_df.empty:
-        return None, None, None, None, None, 0
+        return None, None, None, None, None, 0, 0
 
     # Use each year's last available cumulative return (month/quarter lengths vary).
     final_rets = season_df.apply(
@@ -141,8 +143,11 @@ def get_seasonality_composite(df, window_type="Month"):
     counts = filtered_df.count(axis=1)
 
     avg_curve = filtered_df.mean(axis=1, skipna=True).where(counts >= 1)
-    p20 = filtered_df.quantile(0.20, axis=1).where(counts >= 3 if n_years >= 3 else counts >= 1)
-    p80 = filtered_df.quantile(0.80, axis=1).where(counts >= 3 if n_years >= 3 else counts >= 1)
+    # Month/quarter lengths differ across years; once some years end, fewer observations remain.
+    # Keep the band visible as long as we have at least 2 years (or 1 if only 1 exists).
+    band_min_years = 2 if n_years >= 2 else 1
+    p20 = filtered_df.quantile(0.20, axis=1).where(counts >= band_min_years)
+    p80 = filtered_df.quantile(0.80, axis=1).where(counts >= band_min_years)
     
     if window_type == "Month":
         curr_mask = (df['Year'] == current_date.year) & (df['Month'] == current_date.month)
@@ -157,7 +162,7 @@ def get_seasonality_composite(df, window_type="Month"):
     else:
         current_curve = pd.Series(dtype=float)
         
-    return current_curve, avg_curve, p20, p80, win_rate, n_years
+    return current_curve, avg_curve, p20, p80, win_rate, n_years, band_min_years
 
 def calculate_drawdown(series):
     roll_max = series.cummax()
@@ -191,7 +196,7 @@ with tab1:
             st.markdown("### 1. Cheapness & Vol Regime")
             st.markdown("""
             <div class='explanation'>
-            <b>What is this? A valuation screener combining "Cheapness" (Z-Score) and "Risk" (using GARCH).</b><br>
+            <b>This cock is a valuation screener combining "Cheapness" (Z-Score) and "Risk" (using GARCH).</b><br>
             <b>So this shit does a Box Cox Transformation (normaliser, but doesn't necessarily mean it becomes normalised after, its just more normal). Then a linear detrending to just consider trend-agnostic, is this shit cheap or rich. So considers trend.</b><br>
             <b>2 Sigma moves, this is on a 6m lookback</b>
             <ul>
@@ -245,12 +250,13 @@ with tab1:
             
             s_mode = st.radio("Window", ["Current Month", "Current Quarter"], horizontal=True)
             w_type = "Month" if "Month" in s_mode else "Quarter"
-            curr, avg, p20, p80, win_rate, n_years = get_seasonality_composite(df, w_type)
+            curr, avg, p20, p80, win_rate, n_years, band_min_years = get_seasonality_composite(df, w_type)
             
             if avg is not None:
-                m1, m2 = st.columns(2)
+                m1, m2, m3 = st.columns(3)
                 m1.metric("10Y Win Rate (period up)", f"{(win_rate * 100):.0f}%" if win_rate is not None else "N/A")
                 m2.metric("Years used", str(n_years))
+                m3.metric("Band min years/day", str(band_min_years))
 
                 fig_s = go.Figure()
                 x_axis = avg.index
