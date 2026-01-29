@@ -82,6 +82,31 @@ def calculate_cvar(returns, position_size=1000, confidence=0.95):
     cvar_10d_usd = cvar_1d_usd * np.sqrt(10)
     return cvar_1d_usd, cvar_10d_usd
 
+def calculate_var(returns, position_size=1000, confidence=0.95, horizon_days=1):
+    """
+    Historical VaR using empirical quantile of returns.
+    - `returns` is expected to be a series of 1-day log returns.
+    - For multi-day VaR, we compute the *actual* horizon return using a rolling window:
+        horizon_logret = sum(log returns over horizon)
+        horizon_simple = exp(horizon_logret) - 1
+      then take the (1-confidence) quantile of horizon_simple.
+    """
+    r = pd.Series(returns).dropna()
+    if r.empty:
+        return None
+
+    if horizon_days <= 1:
+        horizon_simple = np.expm1(r)
+    else:
+        horizon_log = r.rolling(horizon_days).sum().dropna()
+        if horizon_log.empty:
+            return None
+        horizon_simple = np.expm1(horizon_log)
+
+    var_cutoff = np.percentile(horizon_simple, (1 - confidence) * 100)
+    var_usd = abs(var_cutoff) * position_size
+    return float(var_usd)
+
 def calculate_ols_hedge_ratio(series_x, series_y):
     log_x = np.log(series_x)
     log_y = np.log(series_y)
@@ -230,7 +255,22 @@ with tab1:
             fig_risk.update_layout(title=f"Trend-Adjusted Valuation (Z-Score) vs Volatility", template="plotly_dark", height=450)
             st.plotly_chart(fig_risk, use_container_width=True)
             
-            # --- 2. CVaR ---
+            # --- 2. VaR ---
+            st.markdown("#### Value at Risk (VaR)")
+            st.markdown("""
+            <div class='explanation'>
+            <b>Historical VaR:</b> the loss threshold that should only be breached (1−confidence) of the time, based on the empirical return distribution.<br>
+            <b>10-Day VaR here uses an actual 10-day rolling return window</b> (not √t scaling). Assumes USD 1k position.
+            </div>
+            """, unsafe_allow_html=True)
+
+            var_1d = calculate_var(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=1)
+            var_10d = calculate_var(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=10)
+            v1, v2 = st.columns(2)
+            v1.metric("1-Day VaR (95%)", f"${var_1d:.2f}" if var_1d is not None else "N/A")
+            v2.metric("10-Day VaR (95%)", f"${var_10d:.2f}" if var_10d is not None else "N/A")
+
+            # --- 3. CVaR ---
             st.markdown("#### Conditional Value at Risk (CVaR)")
             st.markdown("""
             <div class='explanation'>
