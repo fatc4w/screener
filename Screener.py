@@ -80,9 +80,10 @@ def calculate_ols_hedge_ratio(series_x, series_y):
     log_y = np.log(series_y)
     X = sm.add_constant(log_y)
     model = sm.OLS(log_x, X).fit()
+    alpha = model.params.iloc[0]
     beta = model.params.iloc[1]
-    spread = log_x - (beta * log_y)
-    return spread, beta
+    spread = log_x - (alpha + beta * log_y)
+    return spread, alpha, beta
 
 def get_seasonality_composite(df, window_type="Month"):
     df = df.copy()
@@ -140,7 +141,7 @@ def get_seasonality_composite(df, window_type="Month"):
 
 def calculate_drawdown(series):
     roll_max = series.cummax()
-    drawdown = (series - roll_max) 
+    drawdown = (series / roll_max) - 1
     return drawdown
 
 # --- MAIN DASHBOARD ---
@@ -251,7 +252,7 @@ with tab2:
         
         if dfx is not None and dfy is not None:
             pair = pd.concat([dfx['Close'], dfy['Close']], axis=1, keys=['X', 'Y']).dropna()
-            spread, beta = calculate_ols_hedge_ratio(pair['X'], pair['Y'])
+            spread, alpha, beta = calculate_ols_hedge_ratio(pair['X'], pair['Y'])
             viz_start = end - timedelta(days=365*2)
             spread_2y = spread[spread.index >= viz_start]
             st.info(f"**Hedge Ratio:** 1.0 {tx} vs {beta:.3f} {ty}")
@@ -268,7 +269,8 @@ with tab2:
             </div>
             """, unsafe_allow_html=True)
             
-            dd_2y = calculate_drawdown(spread_2y)
+            spread_price = np.exp(spread_2y)
+            dd_2y = calculate_drawdown(spread_price)
             fig_main = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], subplot_titles=("Spread Performance (Log-OLS)", "Drawdown Risk"))
             fig_main.add_trace(go.Scatter(x=spread_2y.index, y=spread_2y, name="Spread", line=dict(color='cyan')), row=1, col=1)
             fig_main.add_trace(go.Scatter(x=dd_2y.index, y=dd_2y, name="Drawdown", fill='tozeroy', line=dict(color='red')), row=2, col=1)
@@ -371,7 +373,9 @@ with tab2:
             """, unsafe_allow_html=True)
             
             roll_win = 126
-            pair['Roll_Corr'] = pair['X'].rolling(roll_win).corr(pair['Y'])
+            pair['X_ret'] = np.log(pair['X']).diff()
+            pair['Y_ret'] = np.log(pair['Y']).diff()
+            pair['Roll_Corr'] = pair['X_ret'].rolling(roll_win).corr(pair['Y_ret'])
             df_roll_viz = pair[pair.index >= viz_start]
             fig_rc = px.line(df_roll_viz, y='Roll_Corr', title="Rolling 6-Month Correlation")
             fig_rc.add_hline(y=0, line_dash="dot", line_color="white")
