@@ -74,13 +74,33 @@ def calculate_garch_vol(returns):
     res = am.fit(disp='off')
     return (res.conditional_volatility / 100)
 
-def calculate_cvar(returns, position_size=1000, confidence=0.95):
-    var_cutoff = np.percentile(returns, (1 - confidence) * 100)
-    cvar_series = returns[returns <= var_cutoff]
-    cvar_1d_pct = cvar_series.mean()
-    cvar_1d_usd = abs(cvar_1d_pct) * position_size
-    cvar_10d_usd = cvar_1d_usd * np.sqrt(10)
-    return cvar_1d_usd, cvar_10d_usd
+def calculate_cvar(returns, position_size=1000, confidence=0.95, horizon_days=1):
+    """
+    Historical CVaR (Expected Shortfall) using empirical tail mean.
+    - `returns` is expected to be a series of 1-day log returns.
+    - For multi-day CVaR, we compute the *actual* horizon return using a rolling window:
+        horizon_logret = sum(log returns over horizon)
+        horizon_simple = exp(horizon_logret) - 1
+      then take the mean of returns in the (1-confidence) tail.
+    """
+    r = pd.Series(returns).dropna()
+    if r.empty:
+        return None
+
+    if horizon_days <= 1:
+        horizon_simple = np.expm1(r)
+    else:
+        horizon_log = r.rolling(horizon_days).sum().dropna()
+        if horizon_log.empty:
+            return None
+        horizon_simple = np.expm1(horizon_log)
+
+    var_cutoff = np.percentile(horizon_simple, (1 - confidence) * 100)
+    tail = horizon_simple[horizon_simple <= var_cutoff]
+    if len(tail) == 0:
+        return None
+    cvar_usd = abs(float(np.mean(tail))) * position_size
+    return float(cvar_usd)
 
 def calculate_var(returns, position_size=1000, confidence=0.95, horizon_days=1):
     """
@@ -266,23 +286,29 @@ with tab1:
 
             var_1d = calculate_var(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=1)
             var_10d = calculate_var(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=10)
-            v1, v2 = st.columns(2)
+            var_1m = calculate_var(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=21)
+            v1, v2, v3 = st.columns(3)
             v1.metric("1-Day VaR (95%)", f"${var_1d:.2f}" if var_1d is not None else "N/A")
             v2.metric("10-Day VaR (95%)", f"${var_10d:.2f}" if var_10d is not None else "N/A")
+            v3.metric("1-Month VaR (95%)", f"${var_1m:.2f}" if var_1m is not None else "N/A")
 
             # --- 3. CVaR ---
             st.markdown("#### Conditional Value at Risk (CVaR)")
             st.markdown("""
             <div class='explanation'>
-            <b>The 5% tail occurance you lose this amount. Assumes USD 1k position</b><br>
+            <b>Historical CVaR (Expected Shortfall):</b> average loss given you are already in the worst 5% tail.<br>
+            <b>10-Day / 1-Month CVaR here uses actual rolling return windows</b> (not √t scaling). Assumes USD 1k position.
             </div>
             """, unsafe_allow_html=True)
             
-            cvar_1d, cvar_10d = calculate_cvar(df_viz['LogRet'], position_size=1000)
-            m1, m2, m3 = st.columns(3)
-            m1.metric("1-Day CVaR (95%)", f"${cvar_1d:.2f}")
-            m2.metric("10-Day CVaR (95%)", f"${cvar_10d:.2f}")
-            m3.metric("Current Vol (Ann)", f"{df_viz['GARCH'].iloc[-1] * np.sqrt(252) * 100:.2f}%")
+            cvar_1d = calculate_cvar(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=1)
+            cvar_10d = calculate_cvar(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=10)
+            cvar_1m = calculate_cvar(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=21)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("1-Day CVaR (95%)", f"${cvar_1d:.2f}" if cvar_1d is not None else "N/A")
+            m2.metric("10-Day CVaR (95%)", f"${cvar_10d:.2f}" if cvar_10d is not None else "N/A")
+            m3.metric("1-Month CVaR (95%)", f"${cvar_1m:.2f}" if cvar_1m is not None else "N/A")
+            m4.metric("Current Vol (Ann)", f"{df_viz['GARCH'].iloc[-1] * np.sqrt(252) * 100:.2f}%")
 
             # --- 3. SEASONALITY ---
             st.markdown("### 2. Seasonality Composite")
