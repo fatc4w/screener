@@ -13,6 +13,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import os
+from typing import Optional
 
 # --- CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="Bullshet Screener")
@@ -39,6 +40,61 @@ def briefing(title: str, md: str):
     """UI helper: collapsible briefing text next to a metric/test."""
     with st.expander(f"Briefing: {title}", expanded=False):
         st.markdown(md)
+
+def forward_simple_returns_from_log(log_returns: pd.Series, horizon_days: int) -> pd.Series:
+    """
+    Compute forward simple returns over `horizon_days` using log returns.
+    Returns a series aligned to the start date of the horizon.
+    """
+    lr = pd.Series(log_returns).dropna()
+    if lr.empty or horizon_days < 1:
+        return pd.Series(dtype=float)
+    horizon_log = lr.shift(-1).rolling(horizon_days).sum().shift(-(horizon_days - 1))
+    return np.expm1(horizon_log)
+
+def forward_simple_returns_from_loglevel(log_level: pd.Series, horizon_days: int) -> pd.Series:
+    """
+    Compute forward simple returns for a log-level series (e.g., log spread).
+    """
+    s = pd.Series(log_level).dropna()
+    if s.empty or horizon_days < 1:
+        return pd.Series(dtype=float)
+    horizon_log = s.shift(-horizon_days) - s
+    return np.expm1(horizon_log)
+
+def select_non_overlapping(event_idx: pd.DatetimeIndex, horizon_days: int) -> pd.DatetimeIndex:
+    """Keep first event, then skip any events within the forward window."""
+    if len(event_idx) == 0:
+        return event_idx
+    event_idx = event_idx.sort_values()
+    selected = []
+    last = None
+    for dt in event_idx:
+        if last is None or (dt - last).days >= horizon_days:
+            selected.append(dt)
+            last = dt
+    return pd.DatetimeIndex(selected)
+
+def percentile_rank(series: pd.Series, value: float) -> float:
+    """Percentile rank of `value` within `series` (0-100)."""
+    s = pd.Series(series).dropna()
+    if s.empty:
+        return float("nan")
+    return float(stats.percentileofscore(s, value))
+
+def get_earnings_dates_yf(ticker: str) -> Optional[pd.DatetimeIndex]:
+    """
+    Best-effort earnings dates via yfinance. Returns None if unavailable.
+    """
+    try:
+        t = yf.Ticker(ticker)
+        df = t.get_earnings_dates(limit=32)
+        if df is None or df.empty:
+            return None
+        dates = pd.to_datetime(df.index).normalize()
+        return pd.DatetimeIndex(dates)
+    except Exception:
+        return None
 
 def get_data(ticker, source, start_date, end_date):
     try:
@@ -286,6 +342,88 @@ with tab1:
             fig_risk.add_hline(y=0, line_color="white", line_width=0.5, line_dash="dot", secondary_y=False)
             fig_risk.update_layout(title=f"Trend-Adjusted Valuation (Z-Score) vs Volatility", template="plotly_dark", height=450)
             st.plotly_chart(fig_risk, use_container_width=True)
+
+            # --- 2. PM SIGNAL (PRICE ACTION) ---
+            st.markdown("#### PM Signal (Price Action)")
+            briefing(
+                "PM quick read (cheap/expensive + price action)",
+                r"""
+**What is this?** A simple, PM‑oriented read: are we cheap/rich, is price action stabilizing, and what happened *historically* after similar 7‑day setups.
+
+**How it works (high level):**
+- **Cheap/rich** uses the current Z‑score (detrended price z‑score).
+- **Price action** uses the last 7 trading‑day cumulative log return.
+- **Historical analogs**: find past dates where both the 7‑day return and Z‑score were similar, then compute the *average* forward 7‑day return.
+
+**Interpretation:**
+- Cheap + stabilizing action increases the odds of a bounce (not a guarantee).
+- Rich + weakening action increases the odds of near‑term downside.
+
+**When it can mislead:**
+- Event risk (earnings, macro shocks) can dominate short‑horizon returns.
+- Conditioning on short windows can be noisy; always check sample size.
+                """,
+            )
+
+            r7 = df_viz['LogRet'].rolling(7).sum()
+            curr_r7 = r7.iloc[-1]
+            r7_std = r7.std()
+            r7_tol = 0.5 * r7_std if pd.notna(r7_std) else 0.0
+
+            z_series = df_viz['Z']
+            curr_z = z_series.iloc[-1]
+            z_tol = 0.5
+
+            event_mask = (r7 - curr_r7).abs() <= r7_tol
+            event_mask &= (z_series - curr_z).abs() <= z_tol
+            event_idx = r7.index[event_mask].intersection(r7.dropna().index)
+
+            fwd7 = forward_simple_returns_from_log(df_viz['LogRet'], 7)
+            event_idx = event_idx[event_idx <= fwd7.dropna().index.max()] if not fwd7.dropna().empty else pd.DatetimeIndex([])
+            event_idx = select_non_overlapping(event_idx, horizon_days=7)
+
+            if len(event_idx) > 0:
+                avg_fwd7 = fwd7.loc[event_idx].mean()
+                hit_rate = (fwd7.loc[event_idx] > 0).mean()
+            else:
+                avg_fwd7 = np.nan
+                hit_rate = np.nan
+
+            # Tight handle proxy: 20D range as % of price
+            range20 = (df_viz['Close'].rolling(20).max() - df_viz['Close'].rolling(20).min()) / df_viz['Close'].rolling(20).mean()
+            curr_range20 = range20.iloc[-1]
+            range_pct = percentile_rank(range20.dropna(), curr_range20)
+
+            # Earnings flag share (best-effort)
+            earnings_dates = get_earnings_dates_yf(active) if active else None
+            earnings_flag_pct = None
+            if earnings_dates is not None and len(event_idx) > 0:
+                flags = []
+                for dt in event_idx:
+                    end_dt = dt + pd.Timedelta(days=7)
+                    flags.append(((earnings_dates >= dt.normalize()) & (earnings_dates <= end_dt.normalize())).any())
+                earnings_flag_pct = float(np.mean(flags)) if flags else None
+
+            bias = "Neutral"
+            if curr_z <= -1.5 and curr_r7 >= 0:
+                bias = "Buy bias (cheap + stabilizing)"
+            elif curr_z <= -1.5 and curr_r7 < 0:
+                bias = "Watch (cheap, but still falling)"
+            elif curr_z >= 1.5 and curr_r7 <= 0:
+                bias = "Sell/short bias (rich + weakening)"
+            elif curr_z >= 1.5 and curr_r7 > 0:
+                bias = "Watch (rich, but still rising)"
+
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Signal bias", bias)
+            s2.metric("Tight handle (20D range pctile)", f"{range_pct:.0f}%" if pd.notna(range_pct) else "N/A")
+            s3.metric("Avg fwd 7D return (similar setups)", f"{avg_fwd7*100:.2f}%" if pd.notna(avg_fwd7) else "N/A")
+            s4.metric("Hit rate (fwd 7D > 0)", f"{hit_rate*100:.0f}%" if pd.notna(hit_rate) else "N/A")
+
+            if earnings_flag_pct is not None:
+                st.caption(f"Earnings-window share in matched history: {earnings_flag_pct*100:.0f}% (flagged, not excluded).")
+            else:
+                st.caption("Earnings-window share: unavailable (no earnings calendar).")
             
             # --- 2. VaR ---
             st.markdown("#### Value at Risk (VaR)")
@@ -445,6 +583,69 @@ with tab2:
             viz_start = end - timedelta(days=365*2)
             spread_2y = spread[spread.index >= viz_start]
             st.info(f"**Hedge Ratio:** 1.0 {tx} vs {beta:.3f} {ty}")
+
+            # --- PM SIGNAL (SPREAD EXTREMITY) ---
+            st.markdown("#### PM Signal (Spread Extremity)")
+            briefing(
+                "Spread extremity + forward 3M outcome",
+                r"""
+**What is this?** A simple PM‑style read: how extreme the spread is vs history, whether it’s widening or tightening, and what happened **next 3 months** in similar past episodes.
+
+**How it works (high level):**
+- **Extremity**: compare today’s spread to history (percentile rank).
+- **Velocity**: sign of recent spread change (widening vs tightening).
+- **Historical analogs**: match past dates where spread was at least as extreme and with the same velocity sign. Use **non‑overlapping** events and compute average forward 63‑day spread return.
+
+**Interpretation:**
+- Extreme + widening = often continuation (mean reversion less likely).
+- Extreme + tightening = often reversion (better risk‑reward).
+
+**When it can mislead:**
+- Regime changes can break historical analogs.
+- Short samples reduce confidence; check the match count.
+                """,
+            )
+
+            spread_all = spread.dropna()
+            curr_spread = spread_all.iloc[-1] if not spread_all.empty else np.nan
+            vel_window = 5
+            spread_vel = spread_all.diff(vel_window)
+            curr_vel = spread_vel.iloc[-1] if not spread_vel.empty else np.nan
+            vel_sign = "Widening" if pd.notna(curr_vel) and curr_vel > 0 else "Tightening"
+
+            spread_pct = percentile_rank(spread_all, curr_spread)
+            if pd.notna(spread_pct) and spread_pct >= 50:
+                extreme_mask = spread_all >= curr_spread
+            else:
+                extreme_mask = spread_all <= curr_spread
+
+            vel_mask = spread_vel > 0 if (pd.notna(curr_vel) and curr_vel > 0) else (spread_vel <= 0)
+            event_idx = spread_all.index[extreme_mask & vel_mask]
+
+            fwd63 = forward_simple_returns_from_loglevel(spread_all, 63)
+            event_idx = event_idx[event_idx <= fwd63.dropna().index.max()] if not fwd63.dropna().empty else pd.DatetimeIndex([])
+            event_idx = select_non_overlapping(event_idx, horizon_days=63)
+
+            if len(event_idx) > 0:
+                avg_fwd63 = fwd63.loc[event_idx].mean()
+                hit63 = (fwd63.loc[event_idx] > 0).mean()
+                last_hit = event_idx.max()
+                last_hit_days = (spread_all.index[-1] - last_hit).days if last_hit is not None else None
+            else:
+                avg_fwd63 = np.nan
+                hit63 = np.nan
+                last_hit_days = None
+
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Spread percentile rank", f"{spread_pct:.0f}%" if pd.notna(spread_pct) else "N/A")
+            p2.metric("Velocity (5D)", vel_sign)
+            p3.metric("Avg fwd 3M spread return", f"{avg_fwd63*100:.2f}%" if pd.notna(avg_fwd63) else "N/A")
+            p4.metric("Hit rate (fwd 3M > 0)", f"{hit63*100:.0f}%" if pd.notna(hit63) else "N/A")
+
+            if last_hit_days is not None:
+                st.caption(f"Last similar extreme/velocity setup: {last_hit_days} days ago.")
+            else:
+                st.caption("No historical matches for current extremity/velocity.")
             
             # --- 1. MAIN CHART ---
             briefing(
