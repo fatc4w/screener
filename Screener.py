@@ -35,6 +35,11 @@ POLYGON_KEY = (
 
 # --- HELPER FUNCTIONS ---
 
+def briefing(title: str, md: str):
+    """UI helper: collapsible briefing text next to a metric/test."""
+    with st.expander(f"Briefing: {title}", expanded=False):
+        st.markdown(md)
+
 def get_data(ticker, source, start_date, end_date):
     try:
         if source == "Polygon":
@@ -239,18 +244,25 @@ with tab1:
         if df is not None:
             # --- 1. Z-SCORES ---
             st.markdown("### 1. Cheapness & Vol Regime")
-            st.markdown("""
-            <div class='explanation'>
-            <b>This cock is a valuation screener combining "Cheapness" (Z-Score) and "Risk" (using GARCH).</b><br>
-            <b>So this shit does a Box Cox Transformation (normaliser, but doesn't necessarily mean it becomes normalised after, its just more normal). Then a linear detrending to just consider trend-agnostic, is this shit cheap or rich. So considers trend.</b><br>
-            <b>2 Sigma moves, this is on a 6m lookback</b>
-            <ul>
-                <li><b>Z-Score < -2 (Green Zone):</b> Statistically "Cheap." Potential "Buy the Dip" zone.</li>
-                <li><b>Z-Score > +2 (Red Zone):</b> Statistically "Rich." Potential "Take Profit" zone.</li>
-                <li><b>GARCH (Orange):</b> If high, risk is elevated. Cheap + High Vol = "Falling Knife, fuck off." Cheap + Low Vol = "Stable Entry."</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "Z-Score + GARCH regime",
+                r"""
+**What is this?** A valuation + risk regime view. The blue line is a *standardized* (z-scored) detrended price signal; the orange line is a GARCH(1,1) conditional volatility estimate.
+
+**How it works (high level):**
+- **Z-score**: \(z_t = \\frac{x_t-\\mu_{t}}{\\sigma_{t}}\\) where \\(x_t\\) is a transformed/detrended price signal and \\(\\mu_t,\\sigma_t\\) are rolling mean/std (here ~6 months).
+- **GARCH(1,1)**: models time-varying volatility \(\\sigma_t^2 = \\omega + \\alpha\\epsilon_{t-1}^2 + \\beta\\sigma_{t-1}^2\\).
+
+**Interpretation:**
+- Z below ~-2: *unusually low vs recent history*; above ~+2: *unusually high*.
+- Rising GARCH: volatility regime is elevated → position sizing / risk may need to be smaller.
+
+**When it can mislead:**
+- Z-scores assume “recent history is relevant”; **structural breaks** (regime changes) can invalidate bands.
+- Detrending/transform choices change the signal; treat it as a **screen**, not a forecast.
+- GARCH is sensitive to return outliers; it estimates volatility, not direction.
+                """,
+            )
             
             # Logic
             df_sig = df[df.index >= end - timedelta(days=365*4)].copy()
@@ -277,12 +289,24 @@ with tab1:
             
             # --- 2. VaR ---
             st.markdown("#### Value at Risk (VaR)")
-            st.markdown("""
-            <div class='explanation'>
-            <b>Historical VaR:</b> the loss threshold that should only be breached (1−confidence) of the time, based on the empirical return distribution.<br>
-            <b>10-Day VaR here uses an actual 10-day rolling return window</b> (not √t scaling). Assumes USD 1k position.
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "VaR (historical / empirical)",
+                r"""
+**What is this?** Value-at-Risk estimates a loss threshold over a horizon such that losses exceed it only \\((1-\\alpha)\\) of the time (here \\(\\alpha=95\\%\\)).
+
+**How it works here:** *Historical (non-parametric) VaR* using the empirical distribution:
+- Convert 1‑day log returns to simple returns: \(r = e^{\\ell}-1\\)
+- **1D VaR**: \(\\text{VaR}_{1d} = |Q_{5\\%}(r_{1d})|\\times\\text{position}\)
+- **10D / 1M VaR**: compute rolling \(h\)-day returns (sum log returns → convert to simple), then take the 5% quantile.
+
+**Interpretation:** “Based on the recent return history, a loss worse than this should occur ~5% of the time over that horizon.”
+
+**When it can mislead:**
+- Depends heavily on the chosen history window; **rare events** may be absent.
+- If volatility is changing quickly, historical VaR can lag.
+- VaR says nothing about how bad losses are **beyond** the threshold (that’s what CVaR addresses).
+                """,
+            )
 
             var_1d = calculate_var(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=1)
             var_10d = calculate_var(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=10)
@@ -294,12 +318,22 @@ with tab1:
 
             # --- 3. CVaR ---
             st.markdown("#### Conditional Value at Risk (CVaR)")
-            st.markdown("""
-            <div class='explanation'>
-            <b>Historical CVaR (Expected Shortfall):</b> average loss given you are already in the worst 5% tail.<br>
-            <b>10-Day / 1-Month CVaR here uses actual rolling return windows</b> (not √t scaling). Assumes USD 1k position.
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "CVaR / Expected Shortfall (historical)",
+                r"""
+**What is this?** CVaR (Expected Shortfall) is the *average loss* conditional on being in the worst \\((1-\\alpha)\\) tail of outcomes.
+
+**How it works here:** compute the same horizon return series used for VaR, then:
+- Find the VaR cutoff \(q = Q_{5\\%}(r)\\)
+- Compute \(\\text{CVaR} = |\\mathbb{E}[r\\mid r\\le q]|\\times\\text{position}\\)
+
+**Interpretation:** “If we are already in the worst 5% of outcomes, the average loss is about this much.”
+
+**When it can mislead:**
+- Still depends on the historical sample; if crises aren’t in the window, CVaR understates tail risk.
+- For very small samples, tail estimates are noisy (especially for 10D/1M horizons).
+                """,
+            )
             
             cvar_1d = calculate_cvar(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=1)
             cvar_10d = calculate_cvar(df_viz['LogRet'], position_size=1000, confidence=0.95, horizon_days=10)
@@ -312,6 +346,28 @@ with tab1:
 
             # --- 3. SEASONALITY ---
             st.markdown("### 2. Seasonality Composite")
+            briefing(
+                "Seasonality composite (path + band + win rate)",
+                r"""
+**What is this?** A historical seasonality overlay for the current month/quarter. It shows:
+- **Typical path**: average cumulative return across prior years for that calendar window.
+- **Range band (20–80%)**: percentile band across years at each “day within month/quarter”.
+- **Win rate**: fraction of years where the full month/quarter return was positive.
+
+**How it works (high level):**
+- For each prior year, compute cumulative return from the first trading day of the month/quarter.
+- Align by “day index” (0,1,2,...) and aggregate across years.
+
+**Interpretation:**
+- Band width = dispersion (uncertainty) of historical paths.
+- Win rate reflects how often that calendar window ended positive historically.
+
+**When it can mislead:**
+- Data coverage limits reduce “years used” and can make bands unstable.
+- Seasonality is not causality; regime changes, macro shocks, and event timing can dominate.
+- Month length differs by year → later days may have fewer observations (band can taper).
+                """,
+            )
             
             
             s_mode = st.radio("Window", ["Current Month", "Current Quarter"], horizontal=True)
@@ -353,6 +409,26 @@ with tab1:
 # ==========================================
 with tab2:
     st.markdown("### Relative Value Screener")
+    briefing(
+        "Pair / spread model (log-OLS hedge)",
+        r"""
+**What is this?** A basic relative value (pairs) model using an OLS hedge ratio on log prices.
+
+**How it works (high level):**
+- Regress \(\\log X_t\\) on \(\\log Y_t\\): \(\\log X_t = \\alpha + \\beta \\log Y_t + \\epsilon_t\\)
+- The **spread** shown is the residual: \(\\epsilon_t = \\log X_t - (\\alpha + \\beta\\log Y_t)\\)
+- If the relationship is stable and mean-reverting, the residual can be interpreted as “rich/cheap” vs the pair relationship.
+
+**Interpretation:**
+- \\(\\beta\\) is the hedge ratio (approx. how much Y to short per 1 unit of X, in log terms).
+- A stationary residual supports mean-reversion framing; a non-stationary residual suggests drift/trend.
+
+**When it can mislead:**
+- OLS assumes a stable linear relationship; **structural breaks** and regime changes can break it.
+- Logs are invalid if prices hit 0; corporate actions / bad prints can distort.
+- A stationary residual does not guarantee tradability (costs, borrow, liquidity, jumps).
+        """,
+    )
     c1, c2 = st.columns(2)
     with c1: tx = st.text_input("Long Asset", placeholder="GOOGL").upper()
     with c2: ty = st.text_input("Short Asset", placeholder="SPY").upper()
@@ -371,16 +447,25 @@ with tab2:
             st.info(f"**Hedge Ratio:** 1.0 {tx} vs {beta:.3f} {ty}")
             
             # --- 1. MAIN CHART ---
-            st.markdown("""
-            <div class='explanation'>
-            <b>What is this?</b> Visualizes the performance of the pair trade (Long X / Short Y) and its risk.<br>
-            <b>Screening Logic:</b>
-            <ul>
-                <li><b>Top Chart:</b> The "Price" of the spread. If rising, X is beating Y.</li>
-                <li><b>Bottom Chart (Drawdown):</b> The "Pain." Shows how far the spread has fallen from its peak. If Drawdown is near 0%, momentum is strong. If Drawdown is deep, it's a "Falling Knife."</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "Spread + drawdown",
+                r"""
+**What is this?** The top panel is the (log) spread residual; the bottom is drawdown computed on an implied “spread price” \(e^{\\epsilon_t}\\).
+
+**How it works (high level):**
+- Spread residual \(\\epsilon_t\\) is plotted directly (log units).
+- For drawdown, we convert to a positive price-like series \(S_t = e^{\\epsilon_t}\\) and compute drawdown:
+  \(DD_t = \\frac{S_t}{\\max_{u\\le t} S_u} - 1\\).
+
+**Interpretation:**
+- Drawdown near 0 means the spread is near its historical peak (momentum strong).
+- Large negative drawdown means the spread has fallen materially from peak (risk / pain).
+
+**When it can mislead:**
+- If the spread is non-stationary, drawdown can remain deep for long periods.
+- Drawdown is path-dependent and ignores speed-of-recovery; combine with stationarity + correlation health.
+                """,
+            )
             
             spread_price = np.exp(spread_2y)
             dd_2y = calculate_drawdown(spread_price)
@@ -392,16 +477,26 @@ with tab2:
             
             # --- 2. STATS ---
             st.markdown("#### 2. Stationarity Tests (Stability Check)")
-            st.markdown("""
-            <div class='explanation'>
-            <b>Why check this?</b> To verify if "Cheap" actually means "Cheap."<br>
-            <b>Logic:</b>
-            <ul>
-                <li><b>Stationary (Green):</b> The spread has a stable mean. If it goes up, it usually comes down. Bounds are reliable.</li>
-                <li><b>Non-Stationary (Red):</b> The spread is trending/drifting. "Cheap" can get "Cheaper." Bounds are unreliable.</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "ADF + KPSS stationarity tests",
+                r"""
+**What are these?** Two complementary tests for whether the spread residual behaves like a mean-reverting process.
+
+**How they work (high level):**
+- **ADF (Augmented Dickey-Fuller)** tests the null: **unit root** (non-stationary). Low p-value → reject unit root → evidence of stationarity.
+- **KPSS** tests the null: **stationary** (around a constant here). Low p-value → reject stationarity → evidence of non-stationarity.
+
+**Interpretation (rule of thumb):**
+- ADF p < 0.05 **and** KPSS p > 0.05 → most consistent with stationarity.
+- ADF p > 0.05 **and** KPSS p < 0.05 → most consistent with non-stationarity.
+- If both “reject” or both “don’t reject”, results are ambiguous (window too short, regime change, nonlinearities).
+
+**When they can mislead:**
+- Sensitive to sample window length; short samples reduce power.
+- Structural breaks, changing vol, and non-linear mean reversion can confuse both tests.
+- Stationary does not imply profitable; execution costs/jumps still matter.
+                """,
+            )
             
             clean_s = spread_2y.dropna()
             adf_res = adfuller(clean_s)
@@ -419,17 +514,26 @@ with tab2:
             
             # --- 3. DISTRIBUTION ---
             st.markdown("#### 3. Distribution & Tail Risk")
-            st.markdown("""
-            <div class='explanation'>
-            <b>What is this?</b> Checks if the spread behaves "normally" or if it has extreme moves (Fat Tails).<br>
-            <b>Screening Logic:</b>
-            <ul>
-                <li><b>Histogram:</b> Should look like a Bell Curve.</li>
-                <li><b>Q-Q Plot:</b> If dots deviate from the Red Line at the edges, beware of "Black Swan" moves in this pair.</li>
-                <li><b>Jarque-Bera:</b> A low p-value means "Warning: High Crash Risk" (Non-Normal).</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "Distribution diagnostics (Histogram, Q-Q, Jarque–Bera)",
+                r"""
+**What is this?** A quick check of whether spread changes look approximately normal or exhibit fat tails / skew.
+
+**How it works (high level):**
+- **Histogram** shows the empirical distribution of the spread values.
+- **Q–Q plot** compares empirical quantiles to normal-theory quantiles: deviations in tails indicate fat tails / skew.
+- **Jarque–Bera** tests normality using skewness and kurtosis (null: normal). Low p-value → reject normality.
+
+**Interpretation:**
+- If tails bend away from the line in the Q–Q plot, extreme moves are more likely than a normal model suggests.
+- Low JB p-value means “non-normal”—not necessarily “untradeable”, but tail risk is real.
+
+**When it can mislead:**
+- The spread level itself is not returns; consider also analyzing spread *changes*.
+- Outliers / bad prints can dominate these diagnostics.
+- Many financial series are non-normal; this is a warning flag, not a model selection theorem.
+                """,
+            )
             
             d1, d2, d3 = st.columns(3)
             with d1:
@@ -452,16 +556,24 @@ with tab2:
             
             # --- 4. ACF ---
             st.markdown("#### 4. Autocorrelation (Memory)")
-            st.markdown("""
-            <div class='explanation'>
-            <b>What is this?</b> Checks if today's price is influenced by yesterday's price.<br>
-            <b>Screening Logic:</b>
-            <ul>
-                <li><b>Fast Drop-off:</b> Good. The spread reacts to news quickly and forgets history.</li>
-                <li><b>Slow Decay (Bars stay high):</b> Bad. The spread has "momentum" and drifts. Harder to pick tops/bottoms.</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "ACF (autocorrelation function)",
+                r"""
+**What is this?** The autocorrelation function measures how correlated the series is with its own lagged values.
+
+**How it works (high level):**
+- ACF at lag \(k\): correlation between \(x_t\) and \(x_{t-k}\).
+- The red dashed lines are an approximate 95% confidence band for zero correlation (rule-of-thumb).
+
+**Interpretation:**
+- Fast decay to ~0 suggests little memory (more “shock-driven”).
+- Persistent positive/negative autocorrelation suggests momentum/mean-reversion dynamics.
+
+**When it can mislead:**
+- Non-stationarity inflates autocorrelation.
+- Confidence bands are approximate; heteroskedasticity and regime changes distort them.
+                """,
+            )
             
             acf_vals = acf(clean_s, nlags=40)
             fig_acf = go.Figure()
@@ -474,16 +586,24 @@ with tab2:
             
             # --- 5. ROLLING CORRELATION ---
             st.markdown("#### 5. Relationship Health (Correlation)")
-            st.markdown("""
-            <div class='explanation'>
-            <b>What is this?</b> Checks if the two assets are still moving together.<br>
-            <b>Screening Logic:</b>
-            <ul>
-                <li><b>Correlation > 0.8:</b> Strong relationship. The hedge is working.</li>
-                <li><b>Correlation dropping to 0:</b> Breakdown! The spread is no longer a "pair." It's just two random stocks. <b>Stop trading.</b></li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            briefing(
+                "Rolling correlation (returns)",
+                r"""
+**What is this?** Rolling correlation of **log returns** between the two legs over a ~6-month window.
+
+**How it works (high level):**
+- Compute log returns for each asset.
+- Over a rolling window (e.g., 126 trading days), compute correlation.
+
+**Interpretation:**
+- High positive correlation suggests the hedge relationship is intact.
+- Falling correlation suggests relationship breakdown → hedged pair can behave like two independent risks.
+
+**When it can mislead:**
+- Correlation is not stability of \\(\\beta\\); you can have high corr but changing hedge ratio.
+- Correlation can flip during stress regimes; a stable relationship in calm markets can break in crises.
+                """,
+            )
             
             roll_win = 126
             pair['X_ret'] = np.log(pair['X']).diff()
