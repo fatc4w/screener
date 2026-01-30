@@ -350,11 +350,16 @@ with tab1:
                 r"""
 **What is this?** A simple, PM‑oriented read: are we cheap/rich, is price action stabilizing, and what happened *historically* after similar 7‑day setups.
 
-**How it works (high level):**
-- **Cheap/rich** uses the current Z‑score (detrended price z‑score).
-- **Price action** uses the last 7 trading‑day cumulative log return.
-- **Historical analogs**: find past dates where both the 7‑day return and Z‑score were similar, then compute the *average* forward 7‑day return.
-- **Tight handle**: measures the 20‑day price range as a % of average price, ranked against its own history (lower % = tighter handle).
+**Definitions:**
+- **Cheap**: Z-Score <= -1.5 (statistically low vs recent trend).
+- **Rich**: Z-Score >= 1.5 (statistically high vs recent trend).
+- **Stabilizing**: 7-day cumulative log return >= 0 (downward momentum has paused or reversed).
+- **Weakening**: 7-day cumulative log return <= 0 (upward momentum has paused or reversed).
+- **Still falling**: Z-Score is cheap, but 7-day return is still negative.
+- **Still rising**: Z-Score is rich, but 7-day return is still positive.
+- **Tight handle**: The 20-day price range (High - Low) divided by the 20-day average price. 
+    - A **percentile rank** is then computed against its own history.
+    - **Example**: A 5% "Tight handle" means the current 20-day trading range is narrower than 95% of all other 20-day periods in history. This indicates extreme volatility compression (a "handle" or "base").
 
 **Interpretation:**
 - **Signal bias**:
