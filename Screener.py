@@ -354,14 +354,20 @@ with tab1:
 - **Cheap/rich** uses the current Z‑score (detrended price z‑score).
 - **Price action** uses the last 7 trading‑day cumulative log return.
 - **Historical analogs**: find past dates where both the 7‑day return and Z‑score were similar, then compute the *average* forward 7‑day return.
+- **Tight handle**: measures the 20‑day price range as a % of average price, ranked against its own history (lower % = tighter handle).
 
 **Interpretation:**
-- Cheap + stabilizing action increases the odds of a bounce (not a guarantee).
-- Rich + weakening action increases the odds of near‑term downside.
+- **Signal bias**:
+    - *Buy bias*: cheap (Z < -1.5) and price is stabilizing (7D return >= 0).
+    - *Sell bias*: rich (Z > 1.5) and price is weakening (7D return <= 0).
+    - *Watch*: extreme valuation but price action is still trending against the mean-reversion thesis.
+- **Avg fwd 7D return**: the mean simple return over the next 7 days across all non-overlapping historical matches.
+- **Hit rate**: the percentage of those historical matches that ended with a positive return.
 
 **When it can mislead:**
 - Event risk (earnings, macro shocks) can dominate short‑horizon returns.
 - Conditioning on short windows can be noisy; always check sample size.
+- "Tight handle" can precede a breakout in *either* direction; it indicates compressed volatility, not necessarily a bottom.
                 """,
             )
 
@@ -593,16 +599,19 @@ with tab2:
 
 **How it works (high level):**
 - **Extremity**: compare today’s spread to history (percentile rank).
-- **Velocity**: sign of recent spread change (widening vs tightening).
-- **Historical analogs**: match past dates where spread was at least as extreme and with the same velocity sign. Use **non‑overlapping** events and compute average forward 63‑day spread return.
+- **Velocity**: sign of recent spread change (widening vs tightening) over a 5-day window.
+- **Historical analogs**: find past dates where the spread was at least as extreme as today and had the same velocity sign (widening vs tightening).
+- **Non-overlapping**: to avoid double-counting, once a signal triggers, we skip the next 3 months (63 trading days) before looking for the next match.
 
 **Interpretation:**
-- Extreme + widening = often continuation (mean reversion less likely).
-- Extreme + tightening = often reversion (better risk‑reward).
+- **Extreme + widening**: the spread is stretched but still moving away from the mean. Mean reversion may be premature; "don't catch a falling knife."
+- **Extreme + tightening**: the spread is stretched but has started turning back toward the mean. This often represents a better risk-reward entry for a reversion trade.
+- **Avg fwd 3M spread return**: the average simple return of the spread (Long X / Short Y) over the next 63 trading days across all historical matches.
 
 **When it can mislead:**
-- Regime changes can break historical analogs.
-- Short samples reduce confidence; check the match count.
+- **Structural breaks**: if the fundamental relationship between the two assets has changed, historical analogs are irrelevant.
+- **Sample size**: if the spread is at an all-time extreme, there may be few or no historical matches.
+- **Velocity lag**: a 5-day window might lag very fast turns or be noisy in high-volatility regimes.
                 """,
             )
 
