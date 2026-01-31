@@ -75,6 +75,25 @@ def select_non_overlapping(event_idx: pd.DatetimeIndex, horizon_days: int) -> pd
             last = dt
     return pd.DatetimeIndex(selected)
 
+def select_non_overlapping_by_bars(index: pd.DatetimeIndex, event_idx: pd.DatetimeIndex, horizon_bars: int) -> pd.DatetimeIndex:
+    """
+    Keep the first event, then skip any events that occur within the next `horizon_bars`
+    on the provided trading-day index (avoids weekend/holiday distortions).
+    """
+    if len(event_idx) == 0:
+        return event_idx
+    idx = pd.DatetimeIndex(index).sort_values()
+    pos = {ts: i for i, ts in enumerate(idx)}
+    events = [ts for ts in pd.DatetimeIndex(event_idx).sort_values() if ts in pos]
+    selected = []
+    last_i = None
+    for ts in events:
+        i = pos[ts]
+        if last_i is None or (i - last_i) >= horizon_bars:
+            selected.append(ts)
+            last_i = i
+    return pd.DatetimeIndex(selected)
+
 def percentile_rank(series: pd.Series, value: float) -> float:
     """Percentile rank of `value` within `series` (0-100)."""
     s = pd.Series(series).dropna()
@@ -361,6 +380,15 @@ with tab1:
     - A **percentile rank** is then computed against its own history.
     - **Example**: A 5% "Tight handle" means the current 20-day trading range is narrower than 95% of all other 20-day periods in history. This indicates extreme volatility compression (a "handle" or "base").
 
+**How we define “similar 7‑day stretches” (historical analogs):**
+- We compute the **past‑7 trading day** cumulative log return: \(R_{7}(t)=\\sum_{i=0}^{6}\\ell_{t-i}\\).
+- We match prior dates \(t\\) that satisfy **both**:\n
+  1) \(|R_{7}(t) - R_{7}(\\text{today})| \\le 0.5\\times \\sigma(R_{7})\) (same 7D return regime), and\n
+  2) \(|Z(t) - Z(\\text{today})| \\le 0.5\) (similar valuation regime).
+- We then compute the **forward** 7 trading‑day simple return from \(t\\):\n
+  \(F_{7}(t)=e^{\\sum_{j=1}^{7}\\ell_{t+j}} - 1\\) (i.e., next 7 trading days, not including today).\n
+- We use **non‑overlapping** matches in **trading days** (once a match triggers, we skip the next 7 trading days before allowing another match), to avoid double-counting the same move.
+
 **Interpretation:**
 - **Signal bias**:
     - *Buy bias*: cheap (Z < -1.5) and price is stabilizing (7D return >= 0).
@@ -376,12 +404,14 @@ with tab1:
                 """,
             )
 
-            r7 = df_viz['LogRet'].rolling(7).sum()
+            # Use longer history for analog matching (same data used to compute Z/returns), if available.
+            hist_df = df_sig.copy()
+            r7 = hist_df['LogRet'].rolling(7).sum()
             curr_r7 = r7.iloc[-1]
             r7_std = r7.std()
             r7_tol = 0.5 * r7_std if pd.notna(r7_std) else 0.0
 
-            z_series = df_viz['Z']
+            z_series = hist_df['Z']
             curr_z = z_series.iloc[-1]
             z_tol = 0.5
 
@@ -389,9 +419,9 @@ with tab1:
             event_mask &= (z_series - curr_z).abs() <= z_tol
             event_idx = r7.index[event_mask].intersection(r7.dropna().index)
 
-            fwd7 = forward_simple_returns_from_log(df_viz['LogRet'], 7)
+            fwd7 = forward_simple_returns_from_log(hist_df['LogRet'], 7)
             event_idx = event_idx[event_idx <= fwd7.dropna().index.max()] if not fwd7.dropna().empty else pd.DatetimeIndex([])
-            event_idx = select_non_overlapping(event_idx, horizon_days=7)
+            event_idx = select_non_overlapping_by_bars(hist_df.index, event_idx, horizon_bars=7)
 
             if len(event_idx) > 0:
                 avg_fwd7 = fwd7.loc[event_idx].mean()
@@ -638,7 +668,7 @@ with tab2:
 
             fwd63 = forward_simple_returns_from_loglevel(spread_all, 63)
             event_idx = event_idx[event_idx <= fwd63.dropna().index.max()] if not fwd63.dropna().empty else pd.DatetimeIndex([])
-            event_idx = select_non_overlapping(event_idx, horizon_days=63)
+            event_idx = select_non_overlapping_by_bars(spread_all.index, event_idx, horizon_bars=63)
 
             if len(event_idx) > 0:
                 avg_fwd63 = fwd63.loc[event_idx].mean()
