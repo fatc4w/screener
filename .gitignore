@@ -5,8 +5,16 @@
 !.gitignore
 !requirements.txt
 !Screener.py
+!README.md
 !.streamlit/
 !.streamlit/config.toml
+!notebooks/
+!notebooks/**/*.ipynb
+!china_fx_dashboard.py
+!china_fx_chart.py
+!data/
+!data/*.xlsx
+!data/*.csv
 
 # Never commit secrets
 .env

@@ -8,3 +8,9 @@ statsmodels
 arch
 plotly
 python-dotenv
+beautifulsoup4
+openpyxl
+lxml
+matplotlib
+seaborn
+polygon
