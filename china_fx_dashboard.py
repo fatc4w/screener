@@ -170,12 +170,12 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
         ), secondary_y=False
     )
     
-    # CNY Spot Rate
+    # USDCNY Spot Rate
     fig.add_trace(
         go.Scatter(
             x=spot_filtered['Date'], y=spot_filtered['USDCNY_Spot'],
             mode='lines', line=dict(color='blue', width=1.5),
-            name='CNY Spot Rate'
+            name='USDCNY Spot Rate'
         ), secondary_y=False
     )
     
@@ -191,7 +191,7 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     # Update layout - DARK THEME
     fig.update_layout(
         title=dict(
-            text='<b>CNY/USD (lhs) and Settlement in USD Billion (rhs)</b>',
+            text='<b>USDCNY (lhs) and Settlement in USD Billion (rhs)</b>',
             font=dict(size=20, color='red'),
             x=0.5
         ),
@@ -208,7 +208,7 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     )
     
     # Update y-axes (invert left axis for FX convention)
-    fig.update_yaxes(title_text="CNY/USD", autorange="reversed", secondary_y=False)
+    fig.update_yaxes(title_text="USDCNY", autorange="reversed", secondary_y=False)
     fig.update_yaxes(title_text="USD Billion", secondary_y=True)
     
     # Add zero line on right axis
@@ -222,7 +222,7 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
 # ============================================================
 
 st.title("🇨🇳 China FX Dashboard")
-st.markdown("**CNY/USD Exchange Rate and FX Settlement Data**")
+st.markdown("**USDCNY Exchange Rate and FX Settlement Data**")
 
 # Load data with status
 with st.spinner("Loading FX Settlement from SAFE China..."):
@@ -273,14 +273,14 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.metric("FX Settlement", f"{len(fx_df)} months", f"{fx_df['Date'].min().strftime('%b %Y')} - {fx_df['Date'].max().strftime('%b %Y')}")
 with col2:
-    st.metric("CNY Spot Rate", f"{len(spot_df)} days", f"{spot_df['Date'].min().strftime('%Y-%m-%d')} - {spot_df['Date'].max().strftime('%Y-%m-%d')}")
+    st.metric("USDCNY Spot Rate", f"{len(spot_df)} days", f"{spot_df['Date'].min().strftime('%Y-%m-%d')} - {spot_df['Date'].max().strftime('%Y-%m-%d')}")
 with col3:
     st.metric("Parity Rate", f"{len(parity_df)} months", f"{parity_df['Date'].min().strftime('%b %Y')} - {parity_df['Date'].max().strftime('%b %Y')}")
 
 st.markdown("""
 **Sources:**
 - FX Settlement: [SAFE China](https://www.safe.gov.cn/en/2023/0215/2048.html)
-- CNY Spot Rate: Yahoo Finance (CNY=X)
+- USDCNY Spot Rate: Yahoo Finance (CNY=X)
 - PBOC Central Parity Rate: China Foreign Exchange Trade System (CFETS)
 
 **Formula:** FX Settlement = Row 22 + Row 37 MoM change (in USD Billion)
