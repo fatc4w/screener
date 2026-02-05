@@ -144,15 +144,15 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     fig.add_trace(
         go.Scatter(
             x=parity_filtered['Date'], y=parity_filtered['Band_Upper'],
-            fill=None, mode='lines', line=dict(color='rgba(255,0,0,0.3)', width=1),
+            fill=None, mode='lines', line=dict(color='rgba(255,0,0,0.5)', width=0.5),
             name='2% band upper', showlegend=False
         ), secondary_y=False
     )
     fig.add_trace(
         go.Scatter(
             x=parity_filtered['Date'], y=parity_filtered['Band_Lower'],
-            fill='tonexty', mode='lines', line=dict(color='rgba(255,0,0,0.3)', width=1),
-            fillcolor='rgba(255,0,0,0.15)', name='2% trading band'
+            fill='tonexty', mode='lines', line=dict(color='rgba(255,0,0,0.5)', width=0.5),
+            fillcolor='rgba(255,200,200,0.3)', name='2% trading band'
         ), secondary_y=False
     )
     
@@ -160,7 +160,7 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     fig.add_trace(
         go.Scatter(
             x=parity_filtered['Date'], y=parity_filtered['Parity_Rate'],
-            mode='lines', line=dict(color='gray', width=2),
+            mode='lines', line=dict(color='#666666', width=2.5),
             name='PBOC central parity rate'
         ), secondary_y=False
     )
@@ -169,7 +169,7 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     fig.add_trace(
         go.Scatter(
             x=spot_filtered['Date'], y=spot_filtered['USDCNY_Spot'],
-            mode='lines', line=dict(color='blue', width=1),
+            mode='lines', line=dict(color='#0066CC', width=2),
             name='CNY Spot Rate'
         ), secondary_y=False
     )
@@ -178,16 +178,16 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     fig.add_trace(
         go.Scatter(
             x=fx_filtered['Date'], y=fx_filtered['FX_Settlement'],
-            mode='lines', line=dict(color='black', width=2, shape='hv'),
+            mode='lines', line=dict(color='#000000', width=3, shape='hv'),
             name='Settlement (rhs)'
         ), secondary_y=True
     )
     
-    # Update layout
+    # Update layout with white background
     fig.update_layout(
         title=dict(
             text='<b>CNY/USD (lhs) and Settlement in USD Billion (rhs)</b>',
-            font=dict(size=20, color='red'),
+            font=dict(size=20, color='#CC0000'),
             x=0.5
         ),
         height=600,
@@ -198,15 +198,29 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
             y=-0.2,
             xanchor='center',
             x=0.5
-        )
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        font=dict(color='black')
     )
     
     # Update y-axes (invert left axis for FX convention)
-    fig.update_yaxes(title_text="CNY/USD", autorange="reversed", secondary_y=False)
-    fig.update_yaxes(title_text="USD Billion", secondary_y=True)
+    fig.update_yaxes(
+        title_text="CNY/USD", 
+        autorange="reversed", 
+        secondary_y=False,
+        gridcolor='#E5E5E5',
+        showgrid=True
+    )
+    fig.update_yaxes(
+        title_text="USD Billion", 
+        secondary_y=True,
+        gridcolor='#E5E5E5',
+        showgrid=True
+    )
     
     # Add zero line on right axis
-    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, secondary_y=True)
+    fig.add_hline(y=0, line_dash="dash", line_color="#999999", line_width=1.5, secondary_y=True)
     
     return fig
 
@@ -228,15 +242,33 @@ with st.spinner("Loading USDCNY Spot from Yahoo Finance..."):
 with st.spinner("Loading PBOC Central Parity Rate..."):
     parity_df = load_parity_rate()
 
-# Date range selector
-col1, col2 = st.columns(2)
+# Time frame selector
+st.markdown("### Select Time Frame")
+col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
+
 with col1:
-    start_date = st.date_input(
-        "Start Date",
-        value=pd.to_datetime('2023-01-01'),
-        min_value=pd.to_datetime('2010-01-01'),
-        max_value=pd.to_datetime('today')
-    )
+    if st.button("3Y", use_container_width=True):
+        start_date = pd.to_datetime('today') - pd.DateOffset(years=3)
+        st.session_state['start_date'] = start_date
+        
+with col2:
+    if st.button("10Y", use_container_width=True):
+        start_date = pd.to_datetime('today') - pd.DateOffset(years=10)
+        st.session_state['start_date'] = start_date
+        
+with col3:
+    if st.button("ALL", use_container_width=True):
+        start_date = pd.to_datetime('2010-01-01')
+        st.session_state['start_date'] = start_date
+
+# Initialize session state
+if 'start_date' not in st.session_state:
+    st.session_state['start_date'] = pd.to_datetime('2023-01-01')
+
+start_date = st.session_state['start_date']
+
+with col4:
+    st.info(f"📅 Showing data from: **{start_date.strftime('%b %Y')}** to present")
 
 # Create and display chart
 fig = create_chart(fx_df, spot_df, parity_df, start_date=str(start_date))
