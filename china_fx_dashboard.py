@@ -133,9 +133,14 @@ def load_parity_rate():
 def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     """Create the CNY/USD and Settlement chart using Plotly"""
     start = pd.to_datetime(start_date)
+    
+    # Filter data - keep all fx_df since it's monthly and we want the latest
     fx_filtered = fx_df[fx_df['Date'] >= start].copy()
     spot_filtered = spot_df[spot_df['Date'] >= start].copy()
     parity_filtered = parity_df[parity_df['Date'] >= start].copy()
+    
+    # Debug info
+    print(f"FX Settlement filtered: {len(fx_filtered)} rows, latest: {fx_filtered['Date'].max() if len(fx_filtered) > 0 else 'None'}")
     
     # Create figure with secondary y-axis
     fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -144,15 +149,15 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     fig.add_trace(
         go.Scatter(
             x=parity_filtered['Date'], y=parity_filtered['Band_Upper'],
-            fill=None, mode='lines', line=dict(color='rgba(255,0,0,0.5)', width=0.5),
+            fill=None, mode='lines', line=dict(color='rgba(255,0,0,0.3)', width=1),
             name='2% band upper', showlegend=False
         ), secondary_y=False
     )
     fig.add_trace(
         go.Scatter(
             x=parity_filtered['Date'], y=parity_filtered['Band_Lower'],
-            fill='tonexty', mode='lines', line=dict(color='rgba(255,0,0,0.5)', width=0.5),
-            fillcolor='rgba(255,200,200,0.3)', name='2% trading band'
+            fill='tonexty', mode='lines', line=dict(color='rgba(255,0,0,0.3)', width=1),
+            fillcolor='rgba(255,0,0,0.15)', name='2% trading band'
         ), secondary_y=False
     )
     
@@ -160,7 +165,7 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     fig.add_trace(
         go.Scatter(
             x=parity_filtered['Date'], y=parity_filtered['Parity_Rate'],
-            mode='lines', line=dict(color='#666666', width=2.5),
+            mode='lines', line=dict(color='gray', width=2),
             name='PBOC central parity rate'
         ), secondary_y=False
     )
@@ -169,25 +174,25 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
     fig.add_trace(
         go.Scatter(
             x=spot_filtered['Date'], y=spot_filtered['USDCNY_Spot'],
-            mode='lines', line=dict(color='#0066CC', width=2),
+            mode='lines', line=dict(color='blue', width=1.5),
             name='CNY Spot Rate'
         ), secondary_y=False
     )
     
-    # FX Settlement (step chart on right axis)
+    # FX Settlement (step chart on right axis) - THICK WHITE
     fig.add_trace(
         go.Scatter(
             x=fx_filtered['Date'], y=fx_filtered['FX_Settlement'],
-            mode='lines', line=dict(color='#000000', width=3, shape='hv'),
+            mode='lines', line=dict(color='white', width=4, shape='hv'),
             name='Settlement (rhs)'
         ), secondary_y=True
     )
     
-    # Update layout with white background
+    # Update layout - DARK THEME
     fig.update_layout(
         title=dict(
             text='<b>CNY/USD (lhs) and Settlement in USD Billion (rhs)</b>',
-            font=dict(size=20, color='#CC0000'),
+            font=dict(size=20, color='red'),
             x=0.5
         ),
         height=600,
@@ -199,28 +204,15 @@ def create_chart(fx_df, spot_df, parity_df, start_date='2023-01-01'):
             xanchor='center',
             x=0.5
         ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        font=dict(color='black')
+        template='plotly_dark'
     )
     
     # Update y-axes (invert left axis for FX convention)
-    fig.update_yaxes(
-        title_text="CNY/USD", 
-        autorange="reversed", 
-        secondary_y=False,
-        gridcolor='#E5E5E5',
-        showgrid=True
-    )
-    fig.update_yaxes(
-        title_text="USD Billion", 
-        secondary_y=True,
-        gridcolor='#E5E5E5',
-        showgrid=True
-    )
+    fig.update_yaxes(title_text="CNY/USD", autorange="reversed", secondary_y=False)
+    fig.update_yaxes(title_text="USD Billion", secondary_y=True)
     
     # Add zero line on right axis
-    fig.add_hline(y=0, line_dash="dash", line_color="#999999", line_width=1.5, secondary_y=True)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, secondary_y=True)
     
     return fig
 
